@@ -123,6 +123,9 @@ def percent(sheet_id, r1, c1, r2, c2):
 def plain_number(sheet_id, r1, c1, r2, c2):
     return fmt_range(sheet_id, r1, c1, r2, c2, "NUMBER", "#,##0")
 
+def date_fmt(sheet_id, r1, c1, r2, c2):
+    return fmt_range(sheet_id, r1, c1, r2, c2, "DATE", "MM/DD/YYYY")
+
 def right_align(sheet_id, r1, c1, r2, c2):
     return {"repeatCell": {
         "range": {"sheetId": sheet_id,

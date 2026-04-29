@@ -54,6 +54,11 @@ def build_sections(ticker, open_positions, last_row, avg_held_anchor=None,
         oc_prem = round(itm["premium"], 2)
         oc_df = date_to_formula(itm["expiration"])
         oc_status = f"=IF(B5>{itm_strike},\"ITM\",\"OTM\")"
+        oc_open_date = itm.get("open_date", "") or ""
+        oc_open_date_f = date_to_formula(oc_open_date) if oc_open_date else ""
+        oc_open_date_cell = f"={oc_open_date_f}" if oc_open_date_f else ""
+        oc_days_open = f"=TODAY()-{oc_open_date_f}" if oc_open_date_f else ""
+        oc_price_at_open = itm.get("price_at_open", "") or ""
     else:
         itm_strike = ""
         itm_exp = ""
@@ -61,6 +66,7 @@ def build_sections(ticker, open_positions, last_row, avg_held_anchor=None,
         oc_strike = oc_exp = oc_cts = oc_prem = ""
         oc_df = itm_date_f
         oc_status = ""
+        oc_open_date = oc_open_date_f = oc_open_date_cell = oc_days_open = oc_price_at_open = ""
 
     op = open_puts_list[0] if open_puts_list else None
     if op:
@@ -70,10 +76,16 @@ def build_sections(ticker, open_positions, last_row, avg_held_anchor=None,
         op_prem = round(op["premium"], 2)
         op_df = date_to_formula(op["expiration"])
         op_status = f"=IF(B5<{op_strike},\"ITM\",\"OTM\")"
+        op_open_date = op.get("open_date", "") or ""
+        op_open_date_f = date_to_formula(op_open_date) if op_open_date else ""
+        op_open_date_cell = f"={op_open_date_f}" if op_open_date_f else ""
+        op_days_open = f"=TODAY()-{op_open_date_f}" if op_open_date_f else ""
+        op_price_at_open = op.get("price_at_open", "") or ""
     else:
         op_strike = op_exp = op_cts = op_prem = ""
         op_df = "DATE(2099,1,1)"
         op_status = ""
+        op_open_date = op_open_date_f = op_open_date_cell = op_days_open = op_price_at_open = ""
 
     return {
         "A1:C1": [[ticker, "Status", status]],
@@ -124,26 +136,31 @@ def build_sections(ticker, open_positions, last_row, avg_held_anchor=None,
             ["Covered Call Results", "=B13+B14"],
         ],
 
-        "D10:E15": [
+        "D10:E17": [
             ["OPEN CALLS", ""],
             ["Strike", oc_strike],
             ["Expiration", oc_exp],
+            ["Date Opened", oc_open_date_cell],
+            ["Days Open", oc_days_open],
+            ["Stock Price at Open", oc_price_at_open],
             ["Days Left", f"=DAYS({oc_df},TODAY())" if itm else ""],
             ["Contracts", oc_cts],
-            ["Status", oc_status],
         ],
 
-        "G10:H16": [
+        "G10:H17": [
             ["OPEN CALL METRICS", ""],
             ["Premium Received", oc_prem],
             ["Cost to Close", "=B7" if itm else ""],
             ["Unrealized P&L", "=H11+H12" if itm else ""],
-            ["Intrinsic Value", f"=MAX(0,B5-{itm_strike})*E14*100" if itm_strike != "" else ""],
-            ["Time Value", "=H12-H14" if itm else ""],
-            ["** TV Ann Yield", "=IFERROR(MAX(0,-H15)/(-E14*100*B5+B7)*(365/E13),0)" if itm else ""],
+            ["Status", oc_status],
+            ["Intrinsic Value", f"=MAX(0,B5-{itm_strike})*E17*100" if itm_strike != "" else ""],
+            ["Time Value", "=H12-H15" if itm else ""],
+            ["** TV Ann Yield", "=IFERROR(MAX(0,-H16)/(-E17*100*B5+B7)*(365/E16),0)" if itm else ""],
         ],
 
-        "A18:B23": [
+        # Row 18: blank between call and put sections
+
+        "A19:B24": [
             ["PUT HISTORY STATS", ""],
             ["Put Premium Received",
              f"=SUMPRODUCT((C${T}:C${L}=\"Put\")*(J${T}:J${L}>0)*J${T}:J${L})"],
@@ -152,54 +169,59 @@ def build_sections(ticker, open_positions, last_row, avg_held_anchor=None,
             ["Net Put Premium (all time)",
              f"=SUMPRODUCT((C${T}:C${L}=\"Put\")*J${T}:J${L})"],
             ["Puts Market Value", "=B8"],
-            ["Put Results", "=B21+B22"],
+            ["Put Results", "=B22+B23"],
         ],
 
-        "D18:E23": [
+        "D19:E26": [
             ["OPEN PUTS", ""],
             ["Strike", op_strike],
             ["Expiration", op_exp],
+            ["Date Opened", op_open_date_cell],
+            ["Days Open", op_days_open],
+            ["Stock Price at Open", op_price_at_open],
             ["Days Left", f"=DAYS({op_df},TODAY())" if op else ""],
             ["Contracts", op_cts],
-            ["Status", op_status],
         ],
 
-        "G18:H24": [
+        "G19:H26": [
             ["OPEN PUTS METRICS", ""],
             ["Premium Received", op_prem],
             ["Cost to Close", "=B8" if op else ""],
-            ["Unrealized P&L", "=H19+H20" if op else ""],
-            ["Intrinsic Value", f"=MAX(0,{op_strike}-B5)*E22*100" if op else ""],
-            ["Time Value", "=H20-H22" if op else ""],
-            ["TV Ann Yield", "=IFERROR(IF(E21>0,MAX(0,-H23)/(-E22*100*E19)*(365/E21),0),0)" if op else ""],
+            ["Unrealized P&L", "=H20+H21" if op else ""],
+            ["Status", op_status],
+            ["Intrinsic Value", f"=MAX(0,{op_strike}-B5)*E26*100" if op else ""],
+            ["Time Value", "=H21-H24" if op else ""],
+            ["TV Ann Yield", "=IFERROR(IF(E25>0,MAX(0,-H25)/(-E26*100*E20)*(365/E25),0),0)" if op else ""],
         ],
 
-        "A26:B30": [
+        # Row 27: blank between put sections and summary sections
+
+        "A28:B32": [
             ["INCOME", ""],
             ["Total Dividends", f"=SUMPRODUCT((C${T}:C${L}=\"Dividend\")*J${T}:J${L})"],
             ["Dividend Count", f"=COUNTIF(C${T}:C${L},\"Dividend\")"],
             ["Net Call Premium (all time)", "=B13"],
-            ["Net Put Premium (all time)", "=B21"],
+            ["Net Put Premium (all time)", "=B22"],
         ],
 
-        "D26:E31": [
+        "D28:E33": [
             ["P&L BREAKDOWN", ""],
             ["Stock Gain", "=H4"],
             ["Covered Call Results", "=B15"],
-            ["Put Results", "=B23"],
-            ["Dividends", "=B27"],
-            ["Total P&L", "=E27+E28+E29+E30"],
+            ["Put Results", "=B24"],
+            ["Dividends", "=B29"],
+            ["Total P&L", "=E29+E30+E31+E32"],
         ],
 
-        "G26:H29": [
+        "G28:H31": [
             ["RETURNS", ""],
             ["Close-out Value",
              f"=SUMPRODUCT((C${T}:C${L}=\"Stock\")*(B${T}:B${L}=\"Sell\")*J${T}:J${L})"
              if status == "Closed" else "=E6+B7+B8"],
             ["Ann Yield on Invested Capital",
-             f"=IFERROR(E31/(-SUMPRODUCT((C${T}:C${L}=\"Stock\")*(B${T}:B${L}=\"Buy\")*J${T}:J${L}))*(365/H7),0)"
-             if status == "Closed" else "=IFERROR(-E31/E7*(365/H7),0)"],
-            ["Ann Yield on Close-out Value", "=IFERROR(E31/H27*(365/H7),0)"],
+             f"=IFERROR(E33/(-SUMPRODUCT((C${T}:C${L}=\"Stock\")*(B${T}:B${L}=\"Buy\")*J${T}:J${L}))*(365/H7),0)"
+             if status == "Closed" else "=IFERROR(-E33/E7*(365/H7),0)"],
+            ["Ann Yield on Close-out Value", "=IFERROR(E33/H29*(365/H7),0)"],
         ],
 
         f"A{TXN_ROW-2}:K{TXN_ROW-1}": [

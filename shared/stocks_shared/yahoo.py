@@ -1,6 +1,7 @@
-"""Yahoo Finance helpers: live prices, option chains, and historical OHLC."""
+"""Yahoo Finance helpers: live prices, option chains, historical OHLC, and BS pricing."""
 
 import re
+from math import erfc, exp, isfinite, log, sqrt
 
 _price_cache: dict[str, float | None] = {}
 _chain_cache: dict[tuple[str, str], object] = {}
@@ -55,6 +56,70 @@ def fetch_option_market_value(ticker: str, opt_type: str, expiration_str: str,
         return round(-price * contracts * 100, 2)
     except Exception:
         return None
+
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * erfc(-x / sqrt(2))
+
+
+def bs_option_price(S: float, K: float, T: float, r: float, sigma: float, opt_type: str) -> float:
+    """Black-Scholes price for a European call or put."""
+    if T <= 0:
+        return max(0.0, S - K) if opt_type == "Call" else max(0.0, K - S)
+    d1 = (log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * sqrt(T))
+    d2 = d1 - sigma * sqrt(T)
+    if opt_type == "Call":
+        return S * _norm_cdf(d1) - K * exp(-r * T) * _norm_cdf(d2)
+    return K * exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+
+
+def estimate_option_history(price_history, opt_type: str, strike, expiration_str: str,
+                             open_date, contracts: int, r: float = 0.045):
+    """Estimate daily option value (total dollars) using Black-Scholes + 30-day historical vol.
+
+    Returns a pandas Series of total option market value indexed by date,
+    from open_date to the last date in price_history.
+    """
+    import numpy as np
+    import pandas as pd
+
+    m = re.match(r"(\d{2})/(\d{2})/(\d{4})", expiration_str or "")
+    if not m:
+        return None
+    exp_ts = pd.Timestamp(f"{m.group(3)}-{m.group(1)}-{m.group(2)}")
+
+    ph = price_history.copy()
+    if ph.index.tz is not None:
+        ph.index = ph.index.tz_convert(None)
+    ph.index = ph.index.normalize()
+
+    open_ts = pd.Timestamp(open_date)
+    ph_from_open = ph[ph.index >= open_ts]
+    if ph_from_open.empty:
+        return None
+
+    # 30-day rolling vol on full history for a better lookback, then align
+    log_ret = np.log(ph["Close"] / ph["Close"].shift(1))
+    vol = log_ret.rolling(30, min_periods=5).std() * sqrt(252)
+    vol = vol.reindex(ph_from_open.index).ffill().bfill().fillna(0.3)
+
+    K = float(strike)
+    rows = []
+    for date in ph_from_open.index:
+        S         = float(ph_from_open.loc[date, "Close"])
+        T         = max(0.0, (exp_ts - date).days / 365)
+        sigma     = float(vol.loc[date])
+        sigma     = sigma if isfinite(sigma) and sigma > 0.01 else 0.3
+        bs_price  = bs_option_price(S, K, T, r, sigma, opt_type)
+        intrinsic = max(0.0, S - K) if opt_type == "Call" else max(0.0, K - S)
+        time_val  = max(0.0, bs_price - intrinsic)
+        rows.append({
+            "total_value":         bs_price * contracts * 100,
+            "intrinsic_per_share": intrinsic,
+            "time_value_per_share": time_val,
+        })
+
+    return pd.DataFrame(rows, index=ph_from_open.index)
 
 
 def fetch_history(ticker: str, start: str | None = None, end: str | None = None):

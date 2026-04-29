@@ -16,10 +16,10 @@ def detect_open_positions(transactions):
     """Return list of currently open short option positions (net contracts > 0)."""
     pos = defaultdict(lambda: {
         "contracts": 0, "premium": 0.0,
-        "type": None, "strike": None, "expiration": None
+        "type": None, "strike": None, "expiration": None, "open_date": None,
     })
     for row in transactions:
-        _, action, opt_type, symbol, strike, expiration, qty, _, _, amount, _ = row
+        date_str, action, opt_type, symbol, strike, expiration, qty, _, _, amount, _ = row
         if opt_type == "Stock" or qty == "":
             continue
         key = _norm_opt_symbol(symbol)
@@ -30,11 +30,15 @@ def detect_open_positions(transactions):
         amt = float(amount) if amount != "" else 0.0
         q = int(qty)
         if action in ("Sell to Open", "Buy to Open"):
+            if p["contracts"] == 0:
+                p["open_date"] = date_str  # record date of first open
             p["contracts"] += q
             p["premium"] += amt
         elif action in ("Buy to Close", "Sell to Close", "Expired", "Assigned"):
             p["contracts"] -= q
             p["premium"] += amt
+            if p["contracts"] == 0:
+                p["open_date"] = None  # reset if fully closed
 
     return [{"symbol": s, **v} for s, v in pos.items() if v["contracts"] > 0]
 

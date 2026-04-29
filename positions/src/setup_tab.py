@@ -33,6 +33,7 @@ from layout import TXN_ROW, build_sections
 from stocks_shared.yahoo import (
     fetch_live_price as fetch_yahoo_price,
     fetch_option_market_value,
+    fetch_history,
 )
 
 
@@ -58,6 +59,25 @@ def process_ticker(ticker, transactions, brokerage, service,
         current_price = fetch_yahoo_price(ticker)
         if current_price is not None:
             print(f"  Fetched price from Yahoo Finance: {current_price}")
+
+    # Fetch underlying price at open_date for each open position
+    for p in open_positions:
+        p["price_at_open"] = None
+        od = p.get("open_date")
+        if od:
+            try:
+                import re as _re
+                m = _re.match(r"(\d{2})/(\d{2})/(\d{4})", od)
+                if m:
+                    ymd = f"{m.group(3)}-{m.group(1)}-{m.group(2)}"
+                    from datetime import timedelta, date as _date
+                    d = _date.fromisoformat(ymd)
+                    end = (d + timedelta(days=4)).isoformat()  # +4 to catch weekends
+                    hist = fetch_history(ticker, start=ymd, end=end)
+                    if not hist.empty:
+                        p["price_at_open"] = round(float(hist["Close"].iloc[0]), 2)
+            except Exception:
+                pass
 
     open_calls = [p for p in open_positions if p["type"] == "Call"]
     open_puts  = [p for p in open_positions if p["type"] == "Put"]
@@ -146,10 +166,10 @@ def process_ticker(ticker, transactions, brokerage, service,
     if issues:
         sheets.write_range(service, tab_name, "K1", [["Data issues: " + "; ".join(issues)]])
     sheets.write_range(service, tab_name, "K6",  [[adj_text]])
-    sheets.write_range(service, tab_name, "K16", [[tv_call_text]])
-    sheets.write_range(service, tab_name, "K24", [[tv_put_text]])
-    sheets.write_range(service, tab_name, "K28", [[ic_yield_text]])
-    sheets.write_range(service, tab_name, "K29", [[cov_yield_text]])
+    sheets.write_range(service, tab_name, "K17", [[tv_call_text]])
+    sheets.write_range(service, tab_name, "K26", [[tv_put_text]])
+    sheets.write_range(service, tab_name, "K30", [[ic_yield_text]])
+    sheets.write_range(service, tab_name, "K31", [[cov_yield_text]])
 
     def footnote_merge(row0):
         return {"mergeCells": {
@@ -169,20 +189,20 @@ def process_ticker(ticker, transactions, brokerage, service,
         }}
 
     merge_fmt = [
-        footnote_merge(5), footnote_merge(15), footnote_merge(23),
-        footnote_merge(27), footnote_merge(28),
+        footnote_merge(5), footnote_merge(16), footnote_merge(25),
+        footnote_merge(29), footnote_merge(30),
         sheets.light_bg(sheet_id, 5, 0, 6, 2),
         sheets.light_bg(sheet_id, 5, 10, 6, 26),
-        sheets.light_bg(sheet_id, 15, 6, 16, 8),
-        sheets.light_bg(sheet_id, 15, 10, 16, 26),
-        sheets.light_bg(sheet_id, 23, 6, 24, 8),
-        sheets.light_bg(sheet_id, 23, 10, 24, 26),
-        sheets.light_bg(sheet_id, 27, 6, 28, 8),
-        sheets.light_bg(sheet_id, 27, 10, 28, 26),
-        sheets.light_bg(sheet_id, 28, 6, 29, 8),
-        sheets.light_bg(sheet_id, 28, 10, 29, 26),
-        footnote_overflow(4), footnote_overflow(15), footnote_overflow(23),
-        footnote_overflow(27), footnote_overflow(28),
+        sheets.light_bg(sheet_id, 16, 6, 17, 8),
+        sheets.light_bg(sheet_id, 16, 10, 17, 26),
+        sheets.light_bg(sheet_id, 25, 6, 26, 8),
+        sheets.light_bg(sheet_id, 25, 10, 26, 26),
+        sheets.light_bg(sheet_id, 29, 6, 30, 8),
+        sheets.light_bg(sheet_id, 29, 10, 30, 26),
+        sheets.light_bg(sheet_id, 30, 6, 31, 8),
+        sheets.light_bg(sheet_id, 30, 10, 31, 26),
+        footnote_overflow(4), footnote_overflow(16), footnote_overflow(25),
+        footnote_overflow(29), footnote_overflow(30),
     ]
     if issues:
         merge_fmt += [
@@ -197,8 +217,8 @@ def process_ticker(ticker, transactions, brokerage, service,
         sheets.status_cell_fmt(sheet_id, status),
         sheets.section_header(sheet_id, 2),
         sheets.section_header(sheet_id, 9),
-        sheets.section_header(sheet_id, 17),
-        sheets.section_header(sheet_id, 25),
+        sheets.section_header(sheet_id, 18),
+        sheets.section_header(sheet_id, 27),
         sheets.section_header(sheet_id, TXN_ROW - 3),
         sheets.col_header(sheet_id, TXN_ROW - 2),
         sheets.yellow_bg(sheet_id, 4, 1, 5, 2),
@@ -217,37 +237,51 @@ def process_ticker(ticker, transactions, brokerage, service,
         sheets.right_align(sheet_id, 14, 4, 15, 5),
         sheets.currency(sheet_id, 10, 7, 15, 8),
         sheets.percent(sheet_id, 15, 7, 16, 8),
-        sheets.currency(sheet_id, 18, 1, 23, 2),
-        sheets.currency(sheet_id, 18, 4, 19, 5),
-        sheets.plain_number(sheet_id, 20, 4, 21, 5),
-        sheets.plain_number(sheet_id, 21, 4, 22, 5),
-        sheets.right_align(sheet_id, 22, 4, 23, 5),
-        sheets.currency(sheet_id, 18, 7, 23, 8),
-        sheets.percent(sheet_id, 23, 7, 24, 8),
-        sheets.currency(sheet_id, 26, 1, 27, 2),
-        sheets.plain_number(sheet_id, 27, 1, 28, 2),
-        sheets.currency(sheet_id, 28, 1, 30, 2),
-        sheets.currency(sheet_id, 26, 4, 31, 5),
-        sheets.currency(sheet_id, 26, 7, 27, 8),
-        sheets.percent(sheet_id, 27, 7, 29, 8),
+        sheets.currency(sheet_id, 10, 7, 13, 8),
+        sheets.right_align(sheet_id, 13, 7, 14, 8),
+        sheets.currency(sheet_id, 14, 7, 16, 8),
+        sheets.percent(sheet_id, 16, 7, 17, 8),
+        sheets.currency(sheet_id, 10, 4, 11, 5),
+        sheets.date_fmt(sheet_id, 12, 4, 13, 5),
+        sheets.currency(sheet_id, 14, 4, 15, 5),
+        sheets.plain_number(sheet_id, 13, 4, 14, 5),
+        sheets.plain_number(sheet_id, 15, 4, 16, 5),
+        sheets.plain_number(sheet_id, 16, 4, 17, 5),
+        sheets.currency(sheet_id, 19, 1, 24, 2),
+        sheets.currency(sheet_id, 19, 4, 20, 5),
+        sheets.date_fmt(sheet_id, 21, 4, 22, 5),
+        sheets.currency(sheet_id, 23, 4, 24, 5),
+        sheets.plain_number(sheet_id, 22, 4, 23, 5),
+        sheets.plain_number(sheet_id, 24, 4, 25, 5),
+        sheets.plain_number(sheet_id, 25, 4, 26, 5),
+        sheets.currency(sheet_id, 19, 7, 22, 8),
+        sheets.right_align(sheet_id, 22, 7, 23, 8),
+        sheets.currency(sheet_id, 23, 7, 25, 8),
+        sheets.percent(sheet_id, 25, 7, 26, 8),
+        sheets.currency(sheet_id, 28, 1, 29, 2),
+        sheets.plain_number(sheet_id, 29, 1, 30, 2),
+        sheets.currency(sheet_id, 30, 1, 32, 2),
+        sheets.currency(sheet_id, 28, 4, 33, 5),
+        sheets.currency(sheet_id, 28, 7, 29, 8),
+        sheets.percent(sheet_id, 29, 7, 31, 8),
         sheets.currency(sheet_id, TXN_ROW - 1, 7, 1000, 10),
         sheets.green_if_positive(sheet_id, 3, 7, 5, 8),
         sheets.green_if_positive(sheet_id, 7, 7, 8, 8),
         sheets.green_if_positive(sheet_id, 12, 1, 13, 2),
         sheets.green_if_positive(sheet_id, 14, 1, 15, 2),
         sheets.green_if_positive(sheet_id, 12, 7, 13, 8),
-        sheets.green_if_positive(sheet_id, 20, 1, 21, 2),
-        sheets.green_if_positive(sheet_id, 22, 1, 23, 2),
-        sheets.green_if_positive(sheet_id, 20, 7, 21, 8),
+        sheets.green_if_positive(sheet_id, 21, 1, 22, 2),
+        sheets.green_if_positive(sheet_id, 23, 1, 24, 2),
+        sheets.green_if_positive(sheet_id, 21, 7, 22, 8),
         sheets.green_if_positive(sheet_id, 10, 1, 11, 2),
-        sheets.green_if_positive(sheet_id, 18, 1, 19, 2),
+        sheets.green_if_positive(sheet_id, 19, 1, 20, 2),
         sheets.green_if_positive(sheet_id, 5, 4, 6, 5),
         sheets.green_if_positive(sheet_id, 10, 7, 11, 8),
-        sheets.green_if_positive(sheet_id, 18, 7, 19, 8),
-        sheets.green_if_positive(sheet_id, 26, 4, 31, 5),
-        sheets.green_if_positive(sheet_id, 26, 1, 27, 2),
-        sheets.green_if_positive(sheet_id, 28, 1, 30, 2),
-        sheets.green_if_positive(sheet_id, 27, 7, 29, 8),
+        sheets.green_if_positive(sheet_id, 19, 7, 20, 8),
+        sheets.green_if_positive(sheet_id, 28, 4, 33, 5),
+        sheets.green_if_positive(sheet_id, 28, 1, 29, 2),
+        sheets.green_if_positive(sheet_id, 30, 1, 32, 2),
+        sheets.green_if_positive(sheet_id, 29, 7, 31, 8),
     ]
     sheets.apply_fmt(service, sheet_id, fmt_requests)
 
