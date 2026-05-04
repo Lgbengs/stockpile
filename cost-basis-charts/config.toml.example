@@ -10,7 +10,7 @@
 
 [[accounts]]
 brokerage = "schwab"
-csv       = "input/schwab556.csv"
+csv       = "input/schwab.csv"
 symbols = ["PFE", "SCHW", "GOOGL"]
 
 # Multiple accounts or brokerages — just add another entry:

@@ -49,9 +49,8 @@ This episode is all about charting your positions with Claude Code.
 It's related to my last episode about making Google Sheets for your
 positions with Claude Code, linked in the description.
 
-We're going to once again use transaction logs from your brokerage,
-but this time we're going to visualize your position performance
-with charts.
+We're gonna once again use transaction logs from your brokerage,
+but this time we'll visualize your position performance with charts.
 
 Borrowing the theme from last episode, the charts in this episode
 will show you something your brokerage account doesn't — your positions
@@ -61,8 +60,8 @@ will show you something your brokerage account doesn't — your positions
 
 DONE -----
 
-Here's a more complex chart.
-We'll dive deeper into this chart later in this episode.
+Here's the more complex underlying chart to the animation we just watched.
+We'll dive deeper into this chart later in the episode.
 
 It visualizes every call and put you've ever bought or sold,
 every dividend you've collected, and every time you've bought and
@@ -71,18 +70,21 @@ you'll download from your brokerage.
 
 I built this entire thing without writing a single line of code,
 I just described what I wanted, and Claude wrote all the
-code to produce these charts, and document them. It even suggested
-the free charting tool to use.
+code to
+ - produce these charts
+ - document them.
+ - it even suggested the free charting tool to use.
 
-[Back to Animation]
+[12 Back to Animation]
 
 DONE -----
 
-This is Claude Design, a new product that comes with Claude Code.
-I simply asked it to animate one of the static charts I generated
-from my transaction log.
+Back to the animation...
 
-That's what you're seeing here and all I did was ask. That was my first
+This is Claude Design, a new product that comes with Claude Code.
+I simply asked it to animate one of the static charts I generated.
+
+And you're seeing the results. This was my first
 experiment with Claude Design, and I'm looking forward to using it more
 in the future.
 
@@ -90,11 +92,11 @@ in the future.
 
 ## SETUP THE PROBLEM (1:30–2:10)
 
-[Show actual chart]
+[13 Show actual chart]
 
 DONE -----
 
-Back to the more detailed static Cost Basis Chart
+Now back to the detailed Cost Basis Chart
 
 Most people look at their brokerage account and see a table or chart
 showing a simple average cost per share. We'll do better.
@@ -106,194 +108,285 @@ of the lines you see here is a view of a different metric measuring how
 profitable your position is.
 
 It also includes the real historical price from Yahoo
-Finance, this blue line.  So you can see the full picture at a glance.
+Finance, this top blue line.  So you can see the full picture at a glance.
+
+[20 dividends on chart]
+
+Before we really dig in to the features of the chart,
+let's see how to add a feature to the chart with Claude.
+
+The orange and green lines here and here,
+have dots that represent events.
+Some of these events are dividends. Lets see if we can mark the dividends
+on the chart with a D, to distinguish them from other kinds of events.
+
 
 ---
 
 ## LIVE DEMO — ADDING PNG EXPORT (2:10–4:10)
 *[Screen: terminal with Claude Code open, chart HTML visible]*
 
-DONE -----
+[21 Claude term]
 
-Before we really dig in to the features of the chart just shown,
-let's see how to add a feature to the chart with Claude Code.
+If you look close, you can see I've asked Claude to do that here...
+Can you make the Dot a D...
 
-The chart outputs as HTML, which is great — but what if I want to
-share one as an image in a doc or a Slack message?  I could just do a
-screen capture, but it might be easier to generate a PNG of the 
-chart.
+Once I hit enter, Claude goes to work, thinking and changing code....
 
-Let me ask Claude...
-But first, I need to remind claude how we run things around here,
-and I'll ask him to put it in his Claude.md file so he remembers 
-going forward.
-
-[go over text in screen...]
+Claude has completed his first attempt at this, lets see how it looks
+by regenerating the charts and viewing...
 
 DONE -----
 
-*[Type into Claude Code: "add a --png flag that saves a static PNG
-of the chart alongside the HTML"]*
+[22 run]
 
-*[Claude writes the code — briefly show the diff scrolling]*
+Here's the command to regenearte the charts...
 
-DONE -----
 
-"Done. Let's run it."
+[23 view chart]
 
-*[Terminal:]*
-`uv run python cost-basis-charts/run_charts.py --symbol PFE --png`
+----- DONE
 
-*[File explorer: PFE_cost_basis.png appears in the charts/ folder]*
-*[Open the PNG]*
+Here's the chart after reloading it.
+Look close and you can see all dividend transactions are marked with a D now
+and every other kind of transaction is not.
 
-DONE -----
-
-"That's the whole workflow. Describe what you want, Claude writes it,
-you test it. No docs, no Stack Overflow, no writing code."
+"That's my workflow. 
+ - Describe what I want
+ - Claude writes it,
+ - I confirm and test it.
+ - I iterate until I get just what I want
+ - No docs, no Stack Overflow, no writing code
+ - Easy mode and time savings
+ - and I can try out whatever I think of with minimal effort
 
 ---
 
 ## THE CHART IN DETAIL (4:10–7:40)
-*[Show a chart with open options — dashed live cost line visible]*
+*[30 stock price]*
 
-"Let's take a closer look at everything on this chart.
+----- Done
 
-The blue line is the closing price from Yahoo Finance — that's what
-the stock actually traded at each day.
+Now lets take a closer look at everything on the chart.
+Here's the legend so you know what each line is.
+They Y axis is price per share
+The X axis is date
+
+The blue line here is from Yahoo Finance — that's what
+the stock actually traded at each day.  It's final right annotation here,
+shows your P/L per share by subtracting the adjusted cost per share
+from the current stock price.
+
+
+*[31 FIFO]*
+ 
+----- Done
 
 The purple line is your stock FIFO cost basis. That's the raw
-average cost of your shares based on the order you bought them —
-first in, first out. Every time you buy shares, it includes them in
+average cost of your shares based on the order you bought them.
+Every time you buy shares, it includes them in
 the average. Every time you sell, the oldest lots come off first
 and it adjusts.
+
+You can see here, I bought 200 shares of SCHW at 69.90, then
+bought another 100 @ 65.  So over on the right you see I have
+300 shares with an average price of 68.27
+
  
 ---- ^^ Done
 
-The orange line is your adjusted cost basis. Every time you collect
-a premium on a covered call or put, or receive a dividend, that income
+[32 Adjusted]
+
+-----Done
+
+the FIFO line only considers stock buys and sells.
+It won't adjust for other kinds of transactions.
+
+The orange line, in contrast, is your adjusted cost basis. Every time you 
+collect a premium on a covered call or put, or receive a dividend, that income
 gets subtracted from your cost. Over time, if you're actively selling
 options and/or collecting dividends, you'll see this
-line drift lower and lower — meaning your cost basis is less, and
+line drift lower — meaning your cost basis is less and less, and
 it's easier for the position to be profitable. The one exception is
 if you sell a debit roll, not a credit, then the line will drift
 higher.  For selling options, that means you paid more premium to close out
 your old position than you collected to open your new position.
 
+Hover over any dot to see exactly what the transaction was.
+And the final right annotation give you your final
+adjusted cost per share
 
-**** looks like rolls aren't showing the STO transaction?
-bug to fix, look at transaction log.
+[33 income]
 
-The dots on the lines mark individual transactions — buys, sells,
-options trades, dividends. Hover over any dot, and you'll see
-exactly what the transaction was. Hover anywhere on the price line,
-and you get the closing price plus your P&L per share against your
-adjusted cost at that date.
+This green line and area down at the bottom of the chart is the income
+you've received over time per share.  It's almost the exact inverse of 
+the orange line, as your income per share normally increases over time.
 
-The labels on the right edge show your current numbers at a glance —
-close price, adjusted cost, and FIFO cost, with P&L in green or red.
+It's right annotation gives you the final per share and total income
+this position has collected.
 
-If you have open covered calls or puts right now, the chart gets
-one more line — the dashed one. The script estimates the current
-market value of each open option using Black-Scholes (linked in
-description) and adds that liability back into your cost basis. So
-you can see your *true* break-even today. This accounts for what it
-would cost to close your open positions. That line updates every
-time you run the script.
 
-The dashed horizontal line shows your strike price over the lifetime
-of your open option — from when you opened it to expiration. You
-can see at a glance whether the stock is above or below your
-strikes.
 
-Below the main lines you'll also see Intrinsic Value and Time Value.
-These break down the current worth of your open options. Intrinsic
-value is how far in the money the option is — the portion that has
-real dollar value right now.
 
-Time value is everything else — the probability premium that decays
-to zero as you approach expiration. Depending on circumstances, Time
-value can be a great indicator of whether to close your position.
-For example, if a covered call is deep ITM and will almost surely
-get called away, and its remaining Time Value is very small compared
-to the position's close out value, then you may consider taking
-action.
 
-You'd probably be better off closing the position and investing in
-better yielding cash or finding another investment opportunity.
+[34 options]
+
+
+If you have open covered calls or puts on a position, the chart gets
+a few more lines. This green dashed line is the estimate of the 
+market value of the open options over time using Black-Scholes 
+(linked in the description).
+It's added to your adjusted cost basis and plotted here.
+
+So you can see your *true* P/L today. This accounts for what it
+would cost to close your open options. 
+
+The dashed horizontal line  here shows your strike price over the lifetime
+of your open option — from when you opened it to the current date.
+You can see at a glance whether the stock is above or below your strike,
+and it's right annotation shows you how many options are open
+and its expiration.
+
+[35 intrinsic time value]
+
+Down toward the bottom of the chart alongside the income
+you'll also see Intrinsic Value and Time Value lines
+for of the open options.
+
+Intrinsic value is how far in the money the option is —
+the portion that has real dollar value right now.
+
+Time value is the rest of the options current market value —
+it decays to zero as you approach expiration.
+
+Depending on circumstances, Time value can be a great indicator of whether
+to close your position. For example, if a covered call is deep ITM and will
+likely get called away, then its remaining Time Value will be very small
+compared to the position's close out value.  You'd probably be better off
+closing the position and using the funds to invest in better yielding cash
+or finding another investment opportunity.
+
+This Time Value Yield computed against closeout value is shown
+in the far right annotation.
+
+[36 summary]
+
+And that's about all I want say about the chart.
+There's a lot of info here, more than you may want or need.
+But it's great if you want a better understanding of the performance
+of your positions over time.
 
 ---
 
 ## HOW I BUILT THIS WITH CLAUDE CODE (7:40–8:20)
 
-"The entire script for building these cost basis charts was written by
-Claude Code. I described what I wanted 
- — parse broker CSVs
- - compute FIFO cost basis,
+[40 how]
+
+Now I'm going to say a little more about how I made this,
+and then if you're still around,
+Please consider liking and subscribing, and then
+I'll talk about how you can install and use this for your positions.
+
+for each feature I described what I wanted to Claude, for example: 
+ — parse the broker CSVs
+ - compute the cost basis,
  - make a line showing this, make another line showing that
  - Annotate this line like this
  - add the historical Yahoo Finance prices,
- - and a line for the current option
 
-And on and on, and Claude wrote it. Then I iterated visually:
-tweaked the chart layout, added things like the Black-Scholes estimate of
-the open option line, added the annotation collision-avoidance so labels
-don't overlap.
+And on and on, and Claude wrote it. Then I iterated to get just like I wanted.
+I tweaked the chart layout, I added things like a dashed line for the
+Black-Scholes estimate of the open option, I asked Claude to make it so
+so labels don't overlap.  I asked Claude to move the legend to the least used
+area of the chart.  And I kept iterating.
 
-The whole workflow is:
-- describe the feature I want to Claude,
-- let Claude work its magic and implement it.
-- look at the output,
-- say what's wrong, 
-- repeat.
+[41 code]
 
-So much easier than the olden days when I actually had to write the code
+---- DONE
+
+It's so much easier than the olden days when I actually had to write this stuff
 from scratch.  And Claude is a better coder, documenter, and refactorer
 than I ever was.
+
+Speaking of refactor, I also asked Claude to follow some best practice
+guidelines for the structure of the project and configuration,
+and to refactor the CSV parsing code so it could be shared accross tools.
+
+Claude did an amazing, several nice suggestions, like also refactoring the 
+Yahoo Finance calls into a shared space.
 
 ---
 
 ## WHAT YOU'LL NEED (8:20–8:45)
 
-If you'd like to do this yourself with your transaction logs,
+[50 subscribe]
+
+---- DONE
+
+If you'd like to generate your position charts with your transaction logs,
 You'll need to do some setup.  The easy-mode way to do this is to get
 a subscription to Claude Code (linked in the description and project README),
-and start Claude in the stockpile/cost-basis-charts directory after cloning
+and start Claude Code in the stockpile directory after cloning
 or downloading the repository.  Then ask it to help you get it running with
 your transactions file.
+
+Sadly I am not being sponsored and have no connection to Anthropic other than
+loving its tools.
+
+[51 Go to repo]
+
+---- DONE
 
 You'll need:
 
 1. A transaction history export from your brokerage. My repo
    currently supports Schwab and Robinhood, more brokerages soon.
-2. Python installed on your machine, see the README for details
+2. you'll need Python and some dependencies installed on your machine,
+   see the README for details
    and let Claude help if you have a Claude subscription.
-3. This repo — link in the description, it's free on GitHub.
+3. And This repo — link in the description, it's free on GitHub.
 
 ---
 
 ## EXPORTING YOUR TRANSACTIONS (8:45–9:15)
-*[Screen recording of Schwab web UI]*
+*[52 show input folder]*
 
-I won't bore you with how to download your brokerage full transaction
-history, just put it somewhere — the /input directory in the root of
-this repo works. Make sure you go back as far as you can to increase
-your chances of getting all your position history. Create a copy of 
-config.toml.example and name it config.toml in the cost-basis-charts folder.
-Then point the configuration in that file to your downloaded transactions file
+=----- Done
+
+Once you've downloaded the full transaction log of an account from your
+broker, put it somewhere — the /input sub folder in the stockpile directory works.
+As you can see, i have some transaction logs here, several from
+Schwab and one from Robinhood.
+
+Make sure you download as many transactions as possible from your broker,
+to increase the chances of getting all your position history.  If you don't
+have the complete history of a position, it won't know enough to make
+an accurate chart.
+
+[53 show creating a copy and editing config]
+
+=----- Done
+
+Then setup your configuration by creating a copy of config.toml.example
+and name it config.toml in the cost-basis-charts folder.
+Then point that configuration to where ever you put your transactions file
 from your brokerage.
 
 ---
 
 ## RUNNING IT (9:15–10:15)
-*[Terminal: `uv run python cost-basis-charts/run_charts.py`]*
+*[60 Run: Terminal: `uv run cost-basis-charts/run_charts.py`]*
+
+=----- Done
 
 Once you've done all the setup, you'll run it with one command from
-the repo root. It'll parse your transactions, pull
-historical prices from Yahoo Finance, and write an interactive HTML
+the repo root.  It will read the config you just set up, parse your
+transactions, pull historical prices from Yahoo Finance, and write an HTML
 file for each ticker into the `cost-basis-charts/charts` folder.
 
-*[Go to charts folder and open one with Chrome]*
+*[61 Go to charts folder and open one with Chrome]*
+
+=----- Done
 
 Open one of the charts you just made, and have a look — be sure to
 hover the mouse over the lines.
@@ -305,17 +398,22 @@ you did.
 ---
 
 ## OUTRO (10:15–10:35)
+
+[70 conclusion]
+
 Link to the repo is in the description — it's all open source. If
 you're running covered calls, wheeling, or just want a more complete
 picture of your positions' performance, this will help.
 
 Let me know in the comments what other views or features would
 be useful, I'd love to hear your ideas about other interesting things
-we could do with our transaction logs.
+we could do with our transaction logs.  Maybe I'll add toggle for each
+line to show or not show.
 
 Please consider liking and subscribing, and have a look at my last
-episode, which was about making Google Sheets from your transaction
-logs.
+episode which should be showing here soon,
+It was about computing position metrics in Google Sheets
+from your transaction logs.
 
 ---
 

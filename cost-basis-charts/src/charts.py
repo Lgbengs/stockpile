@@ -228,17 +228,34 @@ def create_cost_basis_chart(symbol: str, price_history, cost_basis_series: list,
             income_events["date"] = pd.to_datetime(income_events["date"])
             ev_ps    = income_ps.reindex(income_events["date"], method="nearest")
             ev_total = cb_daily["total_income"].reindex(income_events["date"], method="nearest")
-            fig.add_trace(go.Scatter(
-                x=income_events["date"],
-                y=ev_ps.values,
-                mode="markers",
-                marker=dict(size=8, color=sc["income"], symbol="circle",
-                            line=dict(width=1.5, color="white")),
-                text=[f"+${ps:.2f}/shr  ${tot:,.0f} total"
-                      for ps, tot in zip(ev_ps, ev_total)],
-                hovertemplate="%{text}<extra></extra>",
-                showlegend=False,
-            ))
+            hover    = [f"+${ps:.2f}/shr  ${tot:,.0f} total"
+                        for ps, tot in zip(ev_ps, ev_total)]
+            is_div   = income_events["label"].str.startswith("Dividend").values
+            if (~is_div).any():
+                fig.add_trace(go.Scatter(
+                    x=income_events["date"][~is_div],
+                    y=ev_ps.values[~is_div],
+                    mode="markers",
+                    marker=dict(size=8, color=sc["income"], symbol="circle",
+                                line=dict(width=1.5, color="white")),
+                    text=[h for h, d in zip(hover, is_div) if not d],
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False,
+                ))
+            if is_div.any():
+                fig.add_trace(go.Scatter(
+                    x=income_events["date"][is_div],
+                    y=ev_ps.values[is_div],
+                    mode="markers+text",
+                    marker=dict(size=14, color=sc["income"], symbol="circle",
+                                line=dict(width=1.5, color="white")),
+                    text=["D"] * int(is_div.sum()),
+                    textposition="middle center",
+                    textfont=dict(color="white", size=9),
+                    customdata=[h for h, d in zip(hover, is_div) if d],
+                    hovertemplate="%{customdata}<extra></extra>",
+                    showlegend=False,
+                ))
 
     # Collect all right-edge annotations then place with collision avoidance
     annot_items = [
@@ -390,16 +407,32 @@ def create_cost_basis_chart(symbol: str, price_history, cost_basis_series: list,
             if sub.empty:
                 continue
             y_vals = cb_daily[y_col].reindex(sub["date"], method="nearest")
-            fig.add_trace(go.Scatter(
-                x=sub["date"],
-                y=y_vals.values,
-                mode="markers",
-                marker=dict(size=10, color=color, symbol="circle",
-                            line=dict(width=1.5, color="white")),
-                text=sub["label"],
-                hovertemplate="%{text}<extra></extra>",
-                showlegend=False,
-            ))
+            is_div = sub["label"].str.startswith("Dividend").values
+            if (~is_div).any():
+                fig.add_trace(go.Scatter(
+                    x=sub["date"][~is_div],
+                    y=y_vals.values[~is_div],
+                    mode="markers",
+                    marker=dict(size=10, color=color, symbol="circle",
+                                line=dict(width=1.5, color="white")),
+                    text=sub["label"][~is_div],
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False,
+                ))
+            if is_div.any():
+                fig.add_trace(go.Scatter(
+                    x=sub["date"][is_div],
+                    y=y_vals.values[is_div],
+                    mode="markers+text",
+                    marker=dict(size=16, color=color, symbol="circle",
+                                line=dict(width=1.5, color="white")),
+                    text=["D"] * int(is_div.sum()),
+                    textposition="middle center",
+                    textfont=dict(color="white", size=10),
+                    customdata=sub["label"][is_div],
+                    hovertemplate="%{customdata}<extra></extra>",
+                    showlegend=False,
+                ))
 
     fig.update_layout(
         title=dict(
