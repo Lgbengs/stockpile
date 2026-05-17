@@ -50,3 +50,5 @@ Thumbs.db
 
 # Claude Code — local permission overrides (machine-specific paths and allows)
 .claude/settings.local.json
+# Claude Code — shared settings file (override the blanket *.json rule)
+!.claude/settings.json
