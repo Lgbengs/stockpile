@@ -277,6 +277,35 @@ def test_scan_spreads_max_abs_delta_filter(synthetic_chain):
         assert (df["net_delta"].abs() <= 0.10 + 1e-9).all()
 
 
+def test_scan_spreads_pop_range_filter(synthetic_chain):
+    """max_pop tightens the upper bound on POP."""
+    df, errs = scan_spreads(
+        synthetic_chain,
+        strategies=["Bull Put Spread"],
+        min_dte=20, max_dte=90, min_width=5, max_width=25,
+        min_oi=10, min_pop=0.50, max_pop=0.70,
+    )
+    assert errs == []
+    if not df.empty:
+        assert df["pop"].between(0.50, 0.70 + 1e-9).all(), \
+            f"POPs out of range: {df['pop'].tolist()}"
+
+
+def test_scan_spreads_max_pop_default_keeps_all(synthetic_chain):
+    """Default max_pop=1.0 should not filter anything."""
+    open_df, _ = scan_spreads(
+        synthetic_chain, strategies=["Bull Put Spread"],
+        min_dte=20, max_dte=90, min_width=5, max_width=25,
+        min_oi=10, min_pop=0.30,
+    )
+    explicit_df, _ = scan_spreads(
+        synthetic_chain, strategies=["Bull Put Spread"],
+        min_dte=20, max_dte=90, min_width=5, max_width=25,
+        min_oi=10, min_pop=0.30, max_pop=1.0,
+    )
+    assert len(open_df) == len(explicit_df)
+
+
 def test_scan_spreads_max_abs_delta_default_keeps_all(synthetic_chain):
     """Default max_abs_delta=1.0 should not filter anything additional."""
     df_unfiltered, _ = scan_spreads(
@@ -364,6 +393,96 @@ def test_strategy_sets_partition_correctly():
     union = set(DIRECTIONAL_STRATEGIES) | set(NEUTRAL_STRATEGIES)
     missing = set(STRATEGY_NAMES) - union
     assert missing == set(), f"strategies not categorized: {missing}"
+
+
+def test_scan_spreads_large_result_set():
+    """Wide synthetic chain should produce many spreads without crashing.
+
+    Regression guard for the UI render path: confirms the data pipeline
+    stays healthy at the scale that previously crashed the styled table.
+    """
+    spot = 200.0
+    rows = []
+    for dte, exp in [(30, "2026-06-15"), (45, "2026-07-01"),
+                     (60, "2026-07-15"), (90, "2026-08-15")]:
+        T = dte / 365.0
+        for K in range(150, 251, 2):   # 51 strikes per expiration
+            for ot in ("call", "put"):
+                iv = 0.30
+                delta = _bs_delta(spot, K, T, RISK_FREE_RATE, iv, ot)
+                gamma = _bs_gamma(spot, K, T, RISK_FREE_RATE, iv)
+                mid = max(0.05, abs(delta) * 8 + 0.30)
+                rows.append({
+                    "type": ot, "strike": float(K), "expiration": exp,
+                    "dte": dte, "spot": spot,
+                    "bid": mid * 0.95, "ask": mid * 1.05, "mid": mid,
+                    "iv": iv, "iv_fitted": iv, "iv_excess": 0.0,
+                    "delta": delta, "gamma": gamma,
+                    "open_interest": 500, "volume": 100,
+                    "ann_yield_pct": 10.0,
+                })
+    df = pd.DataFrame(rows)
+
+    result, errs = scan_spreads(
+        df,
+        strategies=STRATEGY_NAMES,
+        min_dte=21, max_dte=90,
+        min_width=5, max_width=25,
+        min_oi=10, min_pop=0.50,
+    )
+    assert errs == [], f"unexpected errors: {errs}"
+    assert len(result) > 200, f"only {len(result)} rows on a wide chain — fixture may be off"
+    assert result["pop"].between(0, 1).all()
+    assert (result["risk_reward"] > 0).all()
+    # Confirm at least one strategy individually exceeds the 100-row UI cap
+    per_strategy = result.groupby("strategy").size()
+    assert (per_strategy > 100).any(), \
+        f"no single strategy exceeds 100 rows: {per_strategy.to_dict()}"
+
+
+def test_spread_payoff_data_iv_multiplier_default(synthetic_chain):
+    """iv_multiplier=1.0 (default) must match the no-multiplier output."""
+    from spreads import spread_payoff_data, build_legs_from_row
+    out = build_bull_put_spreads(synthetic_chain, 20, 90, 5, 25, 10)
+    if out.empty:
+        pytest.skip("no spreads on fixture")
+    row = out.iloc[0]
+    legs = build_legs_from_row(row)
+    T = max(int(row["dte"]), 1) / 365.0
+    a = spread_payoff_data(legs, float(row["spot"]), T)
+    b = spread_payoff_data(legs, float(row["spot"]), T, iv_multiplier=1.0)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_spread_payoff_data_iv_multiplier_changes_current(synthetic_chain):
+    """Higher IV shifts pl_current but pl_expiry stays untouched."""
+    from spreads import spread_payoff_data, build_legs_from_row
+    out = build_bull_put_spreads(synthetic_chain, 20, 90, 5, 25, 10)
+    if out.empty:
+        pytest.skip("no spreads on fixture")
+    row = out.iloc[0]
+    legs = build_legs_from_row(row)
+    T = max(int(row["dte"]), 1) / 365.0
+    base = spread_payoff_data(legs, float(row["spot"]), T)
+    high = spread_payoff_data(legs, float(row["spot"]), T, iv_multiplier=1.5)
+    # Expiry curve is intrinsic-only — IV-independent
+    pd.testing.assert_series_equal(base["pl_expiry"], high["pl_expiry"])
+    # Current curve must differ at least somewhere
+    assert not base["pl_current"].equals(high["pl_current"])
+
+
+def test_spread_payoff_data_t_near_zero_converges_to_expiry(synthetic_chain):
+    """T close to 0 should make pl_current converge to pl_expiry."""
+    from spreads import spread_payoff_data, build_legs_from_row
+    out = build_bull_put_spreads(synthetic_chain, 20, 90, 5, 25, 10)
+    if out.empty:
+        pytest.skip("no spreads on fixture")
+    row = out.iloc[0]
+    legs = build_legs_from_row(row)
+    data = spread_payoff_data(legs, float(row["spot"]), T=1 / 365.0)
+    # At 1 day remaining, BS value is ~intrinsic. Allow $0.75/share slack
+    # at the synthetic chain's IV.
+    assert (data["pl_current"] - data["pl_expiry"]).abs().max() < 0.75
 
 
 def test_calendar_with_earnings_dates_no_crash(synthetic_chain):

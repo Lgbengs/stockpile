@@ -1,6 +1,7 @@
 """Streamlit web UI for the options scanner."""
 
 import asyncio
+import math
 import os
 import sys
 import tempfile
@@ -1378,96 +1379,251 @@ _GREEK_HELP = {
 _PAYOFF_HELP = "Select a row in the table above to plot its payoff diagram."
 
 
-def _show_payoff_chart(row: pd.Series, spot: float) -> None:
+def _safe_be(val) -> float | None:
+    """Coerce to a positive finite float, or None if not numeric/finite."""
+    if val is None:
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) and f > 0 else None
+
+
+def _build_payoff_figure(row: pd.Series, data: pd.DataFrame,
+                          legs: list[dict], spot: float,
+                          dte: int, days_fwd: int, iv_mult: float):
+    """Build the Plotly payoff figure: lines, fills, leg markers, prob cone."""
+    import plotly.graph_objects as go
+    import numpy as np
+
+    fig = go.Figure()
+
+    # ── 1. Background fills on the Expiration curve ─────────────────────────
+    fig.add_trace(go.Scatter(
+        x=data["price"], y=data["pl_expiry"].clip(lower=0),
+        mode="lines", line=dict(width=0), fill="tozeroy",
+        fillcolor="rgba(34,197,94,0.18)",
+        showlegend=False, hoverinfo="skip",
+    ))
+    fig.add_trace(go.Scatter(
+        x=data["price"], y=data["pl_expiry"].clip(upper=0),
+        mode="lines", line=dict(width=0), fill="tozeroy",
+        fillcolor="rgba(239,68,68,0.18)",
+        showlegend=False, hoverinfo="skip",
+    ))
+
+    # ── 2. Probability cone (1σ and 2σ bands at expiration) ─────────────────
+    T_to_expiry = max(dte, 1) / 365.0
+    iv_avg = float(np.mean([leg["iv"] for leg in legs])) if legs else 0.0
+    if iv_avg > 0:
+        sigma_T = iv_avg * math.sqrt(T_to_expiry)
+        one_lo = spot * math.exp(-sigma_T)
+        one_hi = spot * math.exp(+sigma_T)
+        two_lo = spot * math.exp(-2 * sigma_T)
+        two_hi = spot * math.exp(+2 * sigma_T)
+        # 2σ outer band (lighter)
+        fig.add_shape(type="rect", xref="x", yref="paper",
+                      x0=two_lo, x1=one_lo, y0=0, y1=1,
+                      fillcolor="rgba(99,102,241,0.07)", line=dict(width=0),
+                      layer="below")
+        fig.add_shape(type="rect", xref="x", yref="paper",
+                      x0=one_hi, x1=two_hi, y0=0, y1=1,
+                      fillcolor="rgba(99,102,241,0.07)", line=dict(width=0),
+                      layer="below")
+        # 1σ inner band (slightly darker)
+        fig.add_shape(type="rect", xref="x", yref="paper",
+                      x0=one_lo, x1=one_hi, y0=0, y1=1,
+                      fillcolor="rgba(99,102,241,0.10)", line=dict(width=0),
+                      layer="below")
+
+    # ── 3. Zero P/L line ─────────────────────────────────────────────────────
+    fig.add_hline(y=0, line=dict(color="#475569", dash="dot", width=1))
+
+    # ── 4. Expiration P/L line ───────────────────────────────────────────────
+    fig.add_trace(go.Scatter(
+        x=data["price"], y=data["pl_expiry"],
+        mode="lines", name="At Expiration",
+        line=dict(color="#0f172a", width=2.5),
+        hovertemplate="Price $%{x:.2f}<br>Expiry P/L $%{y:+.2f}<extra></extra>",
+    ))
+
+    # ── 5. Current P/L line ──────────────────────────────────────────────────
+    current_label = f"Current (+{days_fwd}d, {iv_mult:.2f}× IV)"
+    fig.add_trace(go.Scatter(
+        x=data["price"], y=data["pl_current"],
+        mode="lines", name=current_label,
+        line=dict(color="#64748b", width=2, dash="dash"),
+        hovertemplate="Price $%{x:.2f}<br>Current P/L $%{y:+.2f}<extra></extra>",
+    ))
+
+    # ── 6. Spot marker ───────────────────────────────────────────────────────
+    fig.add_vline(x=spot, line=dict(color="#0f172a", dash="dash", width=1.5))
+    fig.add_annotation(
+        x=spot, y=1.02, yref="paper", xref="x",
+        text=f"<b>Spot ${spot:.2f}</b>", showarrow=False,
+        font=dict(size=11, color="#0f172a"),
+        bgcolor="rgba(255,255,255,0.85)", borderpad=3,
+    )
+
+    # ── 7. Strike markers (per leg) ──────────────────────────────────────────
+    y_max = float(max(data["pl_expiry"].max(), data["pl_current"].max()))
+    y_min = float(min(data["pl_expiry"].min(), data["pl_current"].min()))
+    y_span = max(y_max - y_min, 1.0)
+    for i, leg in enumerate(legs):
+        qty = leg["qty"]
+        K = leg["strike"]
+        ot = leg["type"]
+        label_text = ("Buy" if qty > 0 else "Sell") + f" {K:g}{ot[0].upper()}"
+        color = "#16a34a" if qty > 0 else "#dc2626"
+        fig.add_vline(x=K, line=dict(color=color, dash="dot", width=1))
+        # Stagger: longs near top of plot, shorts a bit lower; rotate per-leg
+        if qty > 0:
+            y_anno = y_max - y_span * 0.05 - (i % 2) * y_span * 0.08
+        else:
+            y_anno = y_min + y_span * 0.10 + (i % 2) * y_span * 0.08
+        fig.add_annotation(
+            x=K, y=y_anno, xref="x", yref="y",
+            text=f"<b>{label_text}</b>", showarrow=False,
+            font=dict(size=10, color="white"),
+            bgcolor=color, borderpad=4, bordercolor=color,
+        )
+
+    # ── 8. Breakeven lines ───────────────────────────────────────────────────
+    for be_col in ("breakeven1", "breakeven2"):
+        be_f = _safe_be(row.get(be_col))
+        if be_f is None:
+            continue
+        fig.add_vline(
+            x=be_f, line=dict(color="#f97316", dash="dash", width=1.5),
+            annotation_text=f"BE ${be_f:.2f}",
+            annotation_position="bottom right",
+            annotation_font=dict(size=10, color="#f97316"),
+        )
+
+    # ── 9. Layout ────────────────────────────────────────────────────────────
+    strategy = row.get("strategy", "Spread")
+    exp = row.get("expiration", "")
+    title_text = f"<b>{strategy}</b> — {exp} — POP {float(row.get('pop', 0)):.0%}"
+    fig.update_layout(
+        title=dict(text=title_text, font=dict(size=14, color="#0f172a"),
+                   x=0, xanchor="left"),
+        height=440,
+        hovermode="x unified",
+        xaxis=dict(
+            title="Stock Price", tickprefix="$", tickformat=",.0f",
+            showgrid=True, gridcolor="rgba(148,163,184,0.25)",
+        ),
+        yaxis=dict(
+            title="P/L per share ($)", tickprefix="$", tickformat="+.2f",
+            showgrid=True, gridcolor="rgba(148,163,184,0.25)",
+            zeroline=False,
+        ),
+        plot_bgcolor="rgba(255,255,255,0)",
+        paper_bgcolor="rgba(255,255,255,0)",
+        legend=dict(orientation="h", yanchor="top", y=1.12,
+                    xanchor="right", x=1, bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=60, r=20, t=80, b=50),
+    )
+    return fig
+
+
+def _show_payoff_footer(row: pd.Series, dte: int) -> None:
+    """Render compact stats below the payoff chart."""
+    cols = st.columns(8)
+    pop = float(row.get("pop", 0))
+    cols[0].metric("POP", f"{pop * 100:.1f}%")
+    cols[1].metric("Max Profit", f"${float(row['max_profit']):+.2f}")
+    cols[2].metric("Max Loss", f"${-float(row['max_loss']):+.2f}")
+    be1 = _safe_be(row.get("breakeven1"))
+    cols[3].metric("BE₁", f"${be1:.2f}" if be1 is not None else "—")
+    cols[4].metric("Δ", f"{float(row['net_delta']):+.3f}",
+                   help=_GREEK_HELP["Δ"])
+    cols[5].metric("θ", f"{float(row['net_theta']):+.4f}",
+                   help=_GREEK_HELP["θ"])
+    cols[6].metric("γ", f"{float(row['net_gamma']):.4f}",
+                   help="Net gamma — rate of change of net delta as spot moves.")
+    cols[7].metric("ν", f"{float(row['net_vega']):+.3f}",
+                   help=_GREEK_HELP["ν"])
+    extras = [f"DTE: {dte}"]
+    be2 = _safe_be(row.get("breakeven2"))
+    if be2 is not None:
+        extras.insert(0, f"BE₂: ${be2:.2f}")
+    extras.append(f"EV: ${float(row.get('expected_value', 0)):+.2f}")
+    extras.append(f"Ann%: {float(row.get('ann_yield_pct', 0)):.1f}%")
+    st.caption("    ".join(extras))
+
+
+def _show_payoff_chart(row: pd.Series, spot: float,
+                        key_prefix: str = "po") -> None:
+    """Interactive Plotly payoff chart with IV + Date sliders and stats footer."""
     from spreads import spread_payoff_data, build_legs_from_row
-    import altair as alt
+
     legs = build_legs_from_row(row)
     if not legs:
         return
-    T = max(int(row["dte"]), 1) / 365.0
-    data = spread_payoff_data(legs, spot, T)
+    dte = max(int(row["dte"]), 1)
 
-    # Melt to long form for Altair
-    melted = data.melt("price", var_name="line", value_name="pl")
-    melted["line"] = melted["line"].map(
-        {"pl_expiry": "At Expiration", "pl_current": "Current Value (BS)"}
-    )
+    # ── Sliders ──────────────────────────────────────────────────────────────
+    c1, c2, c3 = st.columns([1, 1, 0.5])
+    with c1:
+        iv_mult = st.slider(
+            "IV adjustment", 0.50, 2.00, 1.00, 0.05,
+            key=f"{key_prefix}_iv_mult",
+            help="Scale all leg IVs by this factor for the Current P/L curve. "
+                 "1.00 = current IV; >1 simulates an IV expansion; <1 a crush.",
+        )
+    with c2:
+        days_fwd = st.slider(
+            "Days forward (time decay)", 0, max(dte - 1, 0), 0, 1,
+            key=f"{key_prefix}_days_fwd",
+            help="Move the valuation date forward. As days pass the Current P/L "
+                 "curve collapses toward the At Expiration curve.",
+        )
+    with c3:
+        st.write("")  # vertical alignment spacer
+        if st.button("Reset", key=f"{key_prefix}_reset",
+                     use_container_width=True):
+            for k in (f"{key_prefix}_iv_mult", f"{key_prefix}_days_fwd"):
+                st.session_state.pop(k, None)
+            st.rerun()
 
-    # Shaded area: green above 0, red below 0 — use two area layers
-    zero_line = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
-        color="#475569", strokeDash=[3, 3], size=1
-    ).encode(y="y:Q")
+    T_sim = max(dte - days_fwd, 1) / 365.0
+    data = spread_payoff_data(legs, spot, T_sim, iv_multiplier=iv_mult)
 
-    spot_rule = alt.Chart(pd.DataFrame({"x": [spot]})).mark_rule(
-        color="#0f172a", strokeDash=[4, 4], size=1.5
-    ).encode(x="x:Q")
+    fig = _build_payoff_figure(row, data, legs, spot, dte, days_fwd, iv_mult)
+    st.plotly_chart(fig, use_container_width=True, theme=None,
+                    key=f"{key_prefix}_fig")
 
-    # Breakeven rules
-    be_rules = []
-    for be_col, color in [("breakeven1", "#f97316"), ("breakeven2", "#f97316")]:
-        be_val = row.get(be_col)
-        if be_val and not pd.isna(be_val):
-            be_rules.append(
-                alt.Chart(pd.DataFrame({"x": [float(be_val)]})).mark_rule(
-                    color=color, strokeDash=[5, 3], size=1.5
-                ).encode(x="x:Q")
-            )
+    _show_payoff_footer(row, dte)
 
-    color_scale = alt.Scale(
-        domain=["At Expiration", "Current Value (BS)"],
-        range=["#0f172a", "#94a3b8"],
-    )
-    dash_scale = alt.Scale(
-        domain=["At Expiration", "Current Value (BS)"],
-        range=[[1, 0], [6, 3]],
-    )
 
-    lines = alt.Chart(melted).mark_line(size=2).encode(
-        x=alt.X("price:Q", title="Stock Price", axis=alt.Axis(format="$,.0f")),
-        y=alt.Y("pl:Q", title="P&L per share ($)", axis=alt.Axis(format="$.2f")),
-        color=alt.Color("line:N", scale=color_scale,
-                        legend=alt.Legend(title=None, orient="top-left")),
-        strokeDash=alt.StrokeDash("line:N", scale=dash_scale, legend=None),
-    )
-
-    strategy = row.get("strategy", "Spread")
-    exp = row.get("expiration", "")
-    pop_pct = f"{row.get('pop', 0):.0%}"
-    title = f"{strategy} — {exp} — POP {pop_pct}"
-
-    chart = (zero_line + spot_rule + lines)
-    for r in be_rules:
-        chart = chart + r
-    chart = chart.properties(
-        height=300,
-        title=alt.TitleParams(
-            text=title,
-            subtitle=_scan_stamp_text() or None,
-            subtitleColor=_scan_stamp_color(),
-            subtitleFontSize=11,
-            fontSize=14, fontWeight="bold",
-            anchor="start", color="#0f172a",
-        ),
-    )
-    st.altair_chart(chart, use_container_width=True)
-    be_note = []
-    be1 = row.get("breakeven1")
-    be2 = row.get("breakeven2")
-    if be1 and not pd.isna(be1):
-        be_note.append(f"BE₁ ${float(be1):.2f}")
-    if be2 and not pd.isna(be2):
-        be_note.append(f"BE₂ ${float(be2):.2f}")
-    if be_note:
-        st.caption(f"Orange dashed lines mark breakevens: {', '.join(be_note)}. "
-                   "Dashed gray = current BS value assuming constant IV.")
+_MAX_DISPLAY_ROWS = 100
 
 
 def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
-                        spot: float) -> int | None:
-    """Render the ranked spread table. Returns the selected row index or None."""
+                        spot: float) -> tuple[int | None, pd.DataFrame]:
+    """Render the ranked spread table.
+
+    Returns (selected_row_index, displayed_sub) — the index is relative to
+    `displayed_sub`, which may be a head() of the original `sub` when
+    results exceed _MAX_DISPLAY_ROWS.
+    """
     if sub.empty:
         st.info(f"No {strategy_name} spreads found matching the filters.")
-        return None
+        return None, sub
+
+    # Cap displayed rows. scan_spreads has already sorted descending by
+    # the user-selected ranking column, so head() takes the top picks.
+    total = len(sub)
+    truncated = total > _MAX_DISPLAY_ROWS
+    if truncated:
+        sub = sub.head(_MAX_DISPLAY_ROWS).reset_index(drop=True)
 
     # Disclaimer captions
     if strategy_name == "Calendar / Diagonal":
@@ -1477,7 +1633,8 @@ def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
         st.caption("⚠ Max loss is capped at 5× spread width for ranking — "
                    "actual loss is theoretically unlimited above the upper breakeven.")
 
-    has_two_sides = strategy_name in ("Iron Condor", "Iron Butterfly")
+    has_two_sides = strategy_name in ("Iron Condor", "Iron Butterfly",
+                                       "Broken-Wing Butterfly")
 
     disp_rows = []
     for _, r in sub.iterrows():
@@ -1512,35 +1669,44 @@ def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
 
     disp = pd.DataFrame(disp_rows)
 
-    # Row styling: θ+ν sweet spot → bold green; green fill; yellow fill
-    def _row_style(row):
-        i = row.name
-        orig = sub.iloc[i]
-        pt = bool(orig["positive_theta"])
-        pv = bool(orig["positive_vega"])
-        pop = float(orig["pop"])
-        rr = float(orig["risk_reward"])
-        if pt and pv:
-            bg = "background-color: rgba(34,197,94,0.30); outline: 2px solid #16a34a"
-        elif pop >= 0.65 and rr >= 0.20:
-            bg = "background-color: rgba(34,197,94,0.18)"
-        elif pop >= 0.55 and rr >= 0.10:
-            bg = "background-color: rgba(234,179,8,0.22)"
+    # Precompute per-row background styles once (vectorized lookups, no
+    # per-row Python callback during Styler rendering). Past ~500 rows
+    # the old axis=1 apply crashes Streamlit's HTML renderer.
+    sub_pt = sub["positive_theta"].astype(bool).to_numpy()
+    sub_pv = sub["positive_vega"].astype(bool).to_numpy()
+    sub_pop = sub["pop"].to_numpy()
+    sub_rr = sub["risk_reward"].to_numpy()
+    sub_earn = (sub["earnings_in_window"].astype(bool).to_numpy()
+                if "earnings_in_window" in sub.columns
+                else [False] * len(sub))
+
+    row_bgs: list[str] = []
+    for i in range(len(sub)):
+        if sub_pt[i] and sub_pv[i]:
+            row_bgs.append(
+                "background-color: rgba(34,197,94,0.30); outline: 2px solid #16a34a"
+            )
+        elif sub_pop[i] >= 0.65 and sub_rr[i] >= 0.20:
+            row_bgs.append("background-color: rgba(34,197,94,0.18)")
+        elif sub_pop[i] >= 0.55 and sub_rr[i] >= 0.10:
+            row_bgs.append("background-color: rgba(234,179,8,0.22)")
         else:
-            bg = ""
-        return [bg] * len(row)
+            row_bgs.append("")
 
-    earnings_mask = [bool(sub.iloc[i].get("earnings_in_window", False))
-                     for i in range(len(sub))]
+    earnings_bg = "background-color: rgba(249,115,22,0.35)"
 
-    styled = disp.style.apply(_row_style, axis=1)
-    if any(earnings_mask) and "Earnings" in disp.columns:
-        styled = styled.apply(
-            lambda _: ["background-color: rgba(249,115,22,0.35)"
-                       if earnings_mask[i] else ""
-                       for i in range(len(disp))],
-            subset=["Earnings"],
-        )
+    def _styles(_df: pd.DataFrame) -> pd.DataFrame:
+        styles = pd.DataFrame("", index=disp.index, columns=disp.columns)
+        for c in disp.columns:
+            styles[c] = row_bgs
+        if "Earnings" in disp.columns:
+            styles["Earnings"] = [
+                earnings_bg if sub_earn[i] else row_bgs[i]
+                for i in range(len(disp))
+            ]
+        return styles
+
+    styled = disp.style.apply(_styles, axis=None)
 
     col_cfg = {
         "DTE":        st.column_config.NumberColumn("DTE", format="%d", width="small"),
@@ -1578,8 +1744,16 @@ def _show_spreads_table(sub: pd.DataFrame, strategy_name: str,
         key=f"sp_tbl_{strategy_name.replace(' ', '_').replace('/', '_').replace('×', 'x')}",
     )
     _stamp_caption()
+
+    if truncated:
+        st.caption(
+            f"Showing top {_MAX_DISPLAY_ROWS} of {total} total — "
+            "tighten filters (POP, OI, width, |Δ|) to see different matches."
+        )
+
     selected_rows = event.selection.rows if hasattr(event, "selection") else []
-    return selected_rows[0] if selected_rows else None
+    selected_idx = selected_rows[0] if selected_rows else None
+    return selected_idx, sub
 
 
 def _render_spreads_view(
@@ -1666,9 +1840,17 @@ def _render_spreads_view(
 
     f1, f2, f3, f4, _, f5 = st.columns([2, 1, 1, 1, 1, 1.2], vertical_alignment="bottom")
     with f1:
-        min_pop_pct = st.slider("Min POP %", min_value=40, max_value=90,
-                                value=default_min_pop_pct, step=5,
-                                key=f"{key_prefix}_min_pop")
+        pop_range = st.slider(
+            "POP % range",
+            min_value=0, max_value=100,
+            value=(default_min_pop_pct, 100),
+            step=5,
+            key=f"{key_prefix}_pop_range",
+            help="Filter spreads whose probability of profit falls within "
+                 "this range. Drag the right handle to exclude near-certain "
+                 "trades; drag the left handle to set a minimum probability.",
+        )
+        min_pop_pct, max_pop_pct = pop_range
     with f2:
         sort_by = st.selectbox("Sort by",
                                ["Risk/Reward", "POP", "Expected Value", "Ann%"],
@@ -1724,6 +1906,7 @@ def _render_spreads_view(
                 max_width=float(max_width),
                 min_oi=int(min_oi),
                 min_pop=min_pop_pct / 100.0,
+                max_pop=max_pop_pct / 100.0,
                 sort_by=sort_by,
                 only_positive_theta=only_pos_theta,
                 only_positive_vega=only_pos_vega,
@@ -1744,6 +1927,7 @@ def _render_spreads_view(
             "errors": errors,
             "selected_strategies": selected_strategies,
             "min_pop_pct": min_pop_pct,
+            "max_pop_pct": max_pop_pct,
             "max_abs_delta": max_abs_delta,
         }
 
@@ -1784,9 +1968,12 @@ def _render_spreads_view(
     if df_r.empty:
         delta_hint = (f", |Δ| ≤ {res['max_abs_delta']:.2f}"
                       if include_delta_filter else "")
-        st.info(f"No spreads met the filters (POP ≥ {res['min_pop_pct']}%"
-                f"{delta_hint}). Try widening the spread width, lowering "
-                "Min POP, or selecting more strategies.")
+        st.info(
+            f"No spreads met the filters "
+            f"(POP {res['min_pop_pct']}%–{res.get('max_pop_pct', 100)}%"
+            f"{delta_hint}). Try widening the POP range or spread width, "
+            "or selecting more strategies."
+        )
         return
 
     for strategy_name in res["selected_strategies"]:
@@ -1809,12 +1996,19 @@ def _render_spreads_view(
             if strategy_name in ("Long Straddle", "Long Strangle"):
                 st.caption("ℹ Max profit is capped at 3× debit for ranking — "
                            "actual upside is unbounded.")
-            selected_idx = _show_spreads_table(sub, strategy_name, spot)
+            selected_idx, displayed_sub = _show_spreads_table(
+                sub, strategy_name, spot
+            )
 
-            if selected_idx is not None and selected_idx < len(sub):
-                row = sub.iloc[selected_idx]
+            if (selected_idx is not None
+                    and 0 <= selected_idx < len(displayed_sub)):
+                row = displayed_sub.iloc[selected_idx]
                 st.markdown("**Payoff diagram**")
-                _show_payoff_chart(row, spot)
+                safe_strat = (strategy_name.replace(" ", "_")
+                              .replace("/", "_").replace("×", "x"))
+                _show_payoff_chart(
+                    row, spot, key_prefix=f"{key_prefix}_{safe_strat}"
+                )
 
     with st.expander("Column & Greek key"):
         st.markdown("""
