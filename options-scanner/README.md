@@ -42,15 +42,20 @@ A browser tab opens at `http://localhost:8501` with five tabs:
   chart (top picks labeled with their rank — `1` is the strongest
   signal per type), a per-expiration chain view sorted by strike with
   IV+pp row shading and a "Top" column showing the same rank, and a
-  top candidates table ranked across all expirations. The data source
-  (Yahoo Finance / Schwab) toggle sits in the title bar so you can
-  flip between sources without opening the sidebar.
+  top candidates table ranked across all expirations. A Market View
+  card explains what your Direction × Option Type selection screens
+  for, and selecting any candidate row opens an MC Analyze panel
+  with the per-trade P&L distribution. The data source (Yahoo Finance
+  / Schwab) toggle sits in the title bar so you can flip between
+  sources without opening the sidebar.
 - **Portfolio** — drag in a brokerage CSV (Schwab, Robinhood, Fidelity,
   Merrill, or a hand-written
   [stockpile file](../docs/stockpile-format.md)), pick the format, hit
   Scan Portfolio. Each position gets its own chart and table in a
-  collapsible section. The validator runs automatically on upload and
-  shows any problems before you scan.
+  collapsible section, with a Recommended Action card above the table
+  translating the top IV-rich pick into explicit SELL TO OPEN / ROLL
+  instructions. The validator runs automatically on upload and shows
+  any problems before you scan.
 - **Spreads** — power-user view of 13 multi-leg strategies ranked by
   risk/reward subject to a POP threshold. Click a row to see the
   payoff diagram (at-expiry + current value).
@@ -61,6 +66,11 @@ A browser tab opens at `http://localhost:8501` with five tabs:
 
 See [SPREADS.md](SPREADS.md) for the full strategy catalog, column
 reference, POP math, and caveats.
+
+See [MONTE_CARLO.md](MONTE_CARLO.md) for the MC Analyze panel
+(per-trade P&L distribution under GBM + earnings jumps), the
+Market View card, the Portfolio Recommended Action card, and what
+the simulation's assumptions get wrong.
 
 Single Ticker and Portfolio tabs offer a Download HTML Report button.
 
